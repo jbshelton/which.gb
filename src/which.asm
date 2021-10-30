@@ -17,6 +17,8 @@
 ; LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 ; OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 ; SOFTWARE.
+;
+; which.gbbc modification created by Jackson Shelton <jacksonshelton8@gmail.com>, 2021
 
 IF (__RGBDS_MAJOR__ == 0 && (__RGBDS_MINOR__ < 4 || (__RGBDS_MINOR__ == 4 && __RGBDS_PATCH__ < 2)))
     FAIL "Requires RGBDS v0.4.2+"
@@ -70,7 +72,7 @@ main::
     call ResetCursor
     call LoadFont
 
-    print_string_literal "which.gb v0.3\n-------------\n\nseems to be a...\n\n"
+    print_string_literal "which.gb v0.3.GBBC\n-------------\n\nseems to be a...\n\n"
 
     ld a, [wInitialA]
     cp $01
@@ -132,20 +134,29 @@ is_cgb_or_agb_or_ags::
 
 is_cgb::
     ; wave ram is not initialised on cgb0
-    ld de, $ff00
-    ld c, 8
+    ; and is initialized differently on newer (2020+?) GB Boy Colour revisions
+    ; a checksum (adding the bytes) should result in a value of $7F8 on normal
+    ; CGBs and GBBCs, so this assumes CGB0 if bit 3 is set after the test,
+    ; and 2020+ GBBC if any bits 0-2 are set after the test.
+    xor a
+    ldh [$80], a
+    ld c, $00
     ld hl, $ff30
 .loop:
-    ld a, [hl+]
-    cp e
-    jp nz, is_cgb0
-    ld a, [hl+]
-    cp d
-    jp nz, is_cgb0
-    dec c
+    xor a
+    ld a, [hli]
+    add c
+    ld c, a
+    ld a, l
+    cp $40
     jr nz, .loop
+    ld a, c
+    add $08
+    jp nc, is_cgb0
+    and $07
+    jr z, is_cgbABCDE
+    ldh [$80], a
 
-    ; if wave ram is initialised, its not cgb0
 is_cgbABCDE::
 
     ; do some extra OAM writes
@@ -168,21 +179,32 @@ is_cgbABCDE::
     ;   - cgb 0ABC: $44 - because $feb8 & ~$18 == $fea0, so more recent write overwrote $55
     ;   - cgb D: $55
     ;   - cgb E: $aa - ($fea0 & $f0) | (($fea0 & $f0) >> 4))
-    
+
     cp $55
-    jr z, is_cgbD
+    jp z, is_cgbD
 
     cp $aa
-    jr z, is_cgbE
+    jp z, is_cgbE
 
 
 is_cgbABC::
     call check_cgb_ab_or_c
-    cp $f0
-    jr nz, is_cgbC
+    cp $00
+    jr z, is_cgbA
+    cp $01
+    jr z, is_cgbB
+    cp $02
+    jp z, is_gbbc
+    jr is_cgbC
+    
 
-is_cgbAB::
-    print_string_literal "CPU CGB A/B"
+is_cgbA::
+    print_string_literal "\nCPU CGB A\n"
+    print_string_literal "(if serial starts\nwith C10406\nor less)\n"
+    jp done
+
+is_cgbB::
+    print_string_literal "\nCPU CGB B\n"
     jp done
 
 is_cgbC::
@@ -198,9 +220,21 @@ is_cgbE::
     jp done
 
 is_cgb0::
-    print_string_literal "CPU CGB"
+    print_string_literal "CPU CGB\n"
+    jp done
+
+is_gbbc::
+    ldh a, [$80]
+    and $07
+    jr nz, is_gbbc_2020
+    print_string_literal "GB Boy Colour"
+    print_string_literal "\n'05 - June '20 rev\n"
     jp done    
 
+is_gbbc_2020::
+    print_string_literal "GB Boy Colour"
+    print_string_literal "\nJuly '20 rev\n"
+    jp done
 
 is_agb_or_ags::
     call check_agb_or_ags
@@ -222,14 +256,51 @@ done::
 .forever:
     jr .forever
 
-
-
-
-; Check some APU behavior to test if is a CGB CPU A/B or CPU CGB C
+; Check some APU behavior to test if is a CGB CPU A/B or CPU CGB C or GB Boy Colour
 ;
-; @return a `$f0` on CPU CGB A/B, or `$f2` on CPU CGB C
+; @return a '0' on CGB A, or '1' on CGB B, '2' on GBBC and '3' on CGB C
 check_cgb_ab_or_c::
     ld hl, rNR52
+    ld [rDIV], a
+    xor a
+    ldh [rNR52], a
+    cpl
+    ldh [rNR52], a
+
+    ld a, 63
+    ld [rNR31], a
+
+    ld a, $80
+    ld [rNR30], a
+
+    ld a, $70
+    ld [rNR33], a
+
+    ; trigger the channel with length counter disabled
+    ld a, $80
+    ld [rNR34], a
+
+    ; frame sequencer's next step is one that doesn't
+    ; clock the length counter
+    delay $800
+
+    ; set sound length to 1
+    ld a, 63
+    ld [rNR31], a
+
+    ; trigger the channel with length counter disabled again,
+    ; should stop the channel on CGB 0/A and inconsistent Bs
+    ld a, $00
+    ld [rNR34], a
+
+    nop
+
+    ld a, [hl]
+    bit 2, a
+    jr nz, not_cgbA
+    xor a
+    ret
+not_cgbA:
     ld [rDIV], a
     xor a
     ldh [rNR52], a
@@ -242,7 +313,7 @@ check_cgb_ab_or_c::
     ld a, $f0
     ld [rNR22], a
 
-    ld a, $ff
+    ld a, $70
     ld [rNR23], a
 
     ; trigger the channel with length counter disabled
@@ -255,19 +326,31 @@ check_cgb_ab_or_c::
 
     ; set sound length to 1
     ld a, 63
-    ld [rNR21], a
+    ld [rNR31], a
 
     ; trigger the channel with length counter disabled again,
-    ; should stop the channel on CGB A/B
+    ; should stop the channel on CGB B but not GBBC
     ld a, $00
     ld [rNR24], a
 
     nop
 
     ld a, [hl]
-
+    bit 1, a
+    jr nz, check_gbbc
+    ld a, $01
     ret
-
+check_gbbc:
+    xor a
+    ldh [rNR24], a
+    ld a, [hl]
+    bit 1, a
+    jr nz, confirm_cgbC
+    ld a, $02
+    ret
+confirm_cgbC:
+    ld a, $03
+    ret
 
 ; Check how VRAM reads behave at the transition from mode 3 to mode 0.
 ; Assumes LCD is off, and leaves LCD on afterwards.
