@@ -56,7 +56,7 @@ v0.2
 - Thanks to authors of [Gameboy sound hardware](https://gbdev.gg8.se/wiki/articles/Gameboy_sound_hardware) on the Gameboy Development Wiki.
 - Thanks to Joonas Javanainen (gekkio) for his [mooneye-gb](https://github.com/Gekkio/mooneye-gb/) test ROMs which document the register values at boot.
 - Original which.gb written by Matt Currie. 
-- v0.3.GBBC version made by Jackson Shelton.
+- v0.3.GBBC fixes and features added by Jackson Shelton.
 
 ## License
 
