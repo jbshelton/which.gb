@@ -18,7 +18,7 @@
 ; OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 ; SOFTWARE.
 ;
-; which.gbbc modification created by Jackson Shelton <jacksonshelton8@gmail.com>, 2021
+; which.gb v0.4.1 clone detection mod by jbshelton May 2022
 
 IF (__RGBDS_MAJOR__ == 0 && (__RGBDS_MINOR__ < 4 || (__RGBDS_MINOR__ == 4 && __RGBDS_PATCH__ < 2)))
     FAIL "Requires RGBDS v0.4.2+"
@@ -60,7 +60,7 @@ SECTION "main", ROM0[$150]
 
 main::
     di
-    ld sp, $cfff
+    ld sp, $ffff
 
     ld [wInitialA], a
     ld a, b
@@ -72,7 +72,7 @@ main::
     call ResetCursor
     call LoadFont
 
-    print_string_literal "which.gb v0.3.GBBC\n-------------\n\nseems to be a...\n\n"
+    print_string_literal "which.gb v0.4.1\n-------------\n\nseems to be a...\n\n"
 
     ld a, [wInitialA]
     cp $01
@@ -96,7 +96,7 @@ is_dmg_or_sgb::
 
     ld a, [wInitialC]
     cp $13
-    jr z, is_dmgABC
+    jr z, is_dmgABC_or_kf2001
 
 is_sgb::
     print_string_literal "SGB-CPU 01"
@@ -106,11 +106,29 @@ is_dmg0::
     print_string_literal "DMG-CPU"
     jp done
 
-is_dmgABC::
+is_dmgABC_or_kf2001::
+    call wave_corruption_test
+    cp $44
+    jr nz, is_kf2001_early_or_late
     print_string_literal "DMG-CPU A/B/C"
     jp done
 
+is_kf2001_early_or_late::
+    call sweep_test
+    cp $28
+    jr z, is_kf2001_early
+    cp $44
+    jr nz, unknown_other
+    print_string_literal "Kong Feng KF2001\n(2008 - 2009)"
+    jp done
 
+is_kf2001_early::
+    print_string_literal "Kong Feng KF2001\n(1997 - 2008)"
+    jp done
+
+unknown_other::
+    print_string_literal "Unknown! (other)"
+    jp done
 
 is_mgb_or_sgb2::
     ld a, [wInitialC]
@@ -134,29 +152,20 @@ is_cgb_or_agb_or_ags::
 
 is_cgb::
     ; wave ram is not initialised on cgb0
-    ; and is initialized differently on newer (2020+?) GB Boy Colour revisions
-    ; a checksum (adding the bytes) should result in a value of $7F8 on normal
-    ; CGBs and GBBCs, so this assumes CGB0 if bit 3 is set after the test,
-    ; and 2020+ GBBC if any bits 0-2 are set after the test.
-    xor a
-    ldh [$80], a
-    ld c, $00
+    ld de, $ff00
+    ld c, 8
     ld hl, $ff30
 .loop:
-    xor a
-    ld a, [hli]
-    add c
-    ld c, a
-    ld a, l
-    cp $40
+    ld a, [hl+]
+    cp e
+    jp nz, is_cgb0
+    ld a, [hl+]
+    cp d
+    jp nz, is_cgb0
+    dec c
     jr nz, .loop
-    ld a, c
-    add $08
-    jp nc, is_cgb0
-    and $07
-    jr z, is_cgbABCDE
-    ldh [$80], a
 
+    ; if wave ram is initialised, its not cgb0
 is_cgbABCDE::
 
     ; do some extra OAM writes
@@ -179,32 +188,43 @@ is_cgbABCDE::
     ;   - cgb 0ABC: $44 - because $feb8 & ~$18 == $fea0, so more recent write overwrote $55
     ;   - cgb D: $55
     ;   - cgb E: $aa - ($fea0 & $f0) | (($fea0 & $f0) >> 4))
-
+    
     cp $55
     jp z, is_cgbD
 
     cp $aa
     jp z, is_cgbE
 
+is_cgbAB::
+    call check_cgb_a_or_b
+    cp $aa
+    jr z, is_cgbA
+    cp $10
+    jr z, is_cgbABC
+    jr is_kf2005_kf2007
 
 is_cgbABC::
     call check_cgb_ab_or_c
-    cp $00
-    jr z, is_cgbA
-    cp $01
-    jr z, is_cgbB
-    cp $02
-    jp z, is_gbbc
-    jr is_cgbC
-    
+    cp $f0
+    jr nz, is_cgbC
+    call check_cgb_b_early_or_late
+    cp $f0
+    jr nz, is_cgbB
+
+is_cgbB_early::
+    print_string_literal "CPU CGB B\n(early)"
+    jp done
+
+is_kf2005_kf2007::
+    print_string_literal "Kong Feng\nKF2005/KF2007"
+    jp done
 
 is_cgbA::
-    print_string_literal "\nCPU CGB A\n"
-    print_string_literal "(if serial starts\nwith C10406\nor less)\n"
+    print_string_literal "CPU CGB A"
     jp done
 
 is_cgbB::
-    print_string_literal "\nCPU CGB B\n"
+    print_string_literal "CPU CGB B\n(late)"
     jp done
 
 is_cgbC::
@@ -220,21 +240,9 @@ is_cgbE::
     jp done
 
 is_cgb0::
-    print_string_literal "CPU CGB\n"
-    jp done
-
-is_gbbc::
-    ldh a, [$80]
-    and $07
-    jr nz, is_gbbc_2020
-    print_string_literal "GB Boy Colour"
-    print_string_literal "\n'05 - June '20 rev\n"
+    print_string_literal "CPU CGB"
     jp done    
 
-is_gbbc_2020::
-    print_string_literal "GB Boy Colour"
-    print_string_literal "\nJuly '20 rev\n"
-    jp done
 
 is_agb_or_ags::
     call check_agb_or_ags
@@ -252,13 +260,15 @@ is_ags::
 
 done::
     lcd_on
+    xor a
+    ldh [rNR52], a
 
 .forever:
     jr .forever
 
-; Check some APU behavior to test if is a CGB CPU A/B or CPU CGB C or GB Boy Colour
+; Check some APU behavior to test if is a CGB CPU A/B or CPU CGB C
 ;
-; @return a '0' on CGB A, or '1' on CGB B, '2' on GBBC and '3' on CGB C
+; @return a `$f0` on CPU CGB A/B, or `$f2` on CPU CGB C
 check_cgb_ab_or_c::
     ld hl, rNR52
     ld [rDIV], a
@@ -268,12 +278,54 @@ check_cgb_ab_or_c::
     ldh [rNR52], a
 
     ld a, 63
-    ld [rNR31], a
+    ld [rNR21], a
+
+    ld a, $f0
+    ld [rNR22], a
+
+    ld a, $ff
+    ld [rNR23], a
+
+    ; trigger the channel with length counter disabled
+    ld a, $80
+    ld [rNR24], a
+
+    ; frame sequencer's next step is one that doesn't
+    ; clock the length counter
+    delay $800
+
+    ; set sound length to 1
+    ld a, 63
+    ld [rNR21], a
+
+    ; trigger the channel with length counter disabled again,
+    ; should stop the channel on CGB A/B
+    ; it doesn't on a KF2005/KF2007 because the NRx4 glitch needs to be performed twice to kill the channel
+    ; (that's why this test is performed later than the stock which.gb)
+    ld a, $00
+    ld [rNR24], a
+
+    nop
+
+    ld a, [hl]
+
+    ret
+
+check_cgb_b_early_or_late::
+    ld hl, rNR52
+    ld [rDIV], a
+    xor a
+    ldh [rNR52], a
+    cpl
+    ldh [rNR52], a
 
     ld a, $80
-    ld [rNR30], a
+    ldh [rNR30], a
 
-    ld a, $70
+    ld a, 63
+    ld [rNR31], a
+
+    ld a, $ff
     ld [rNR33], a
 
     ; trigger the channel with length counter disabled
@@ -289,68 +341,16 @@ check_cgb_ab_or_c::
     ld [rNR31], a
 
     ; trigger the channel with length counter disabled again,
-    ; should stop the channel on CGB 0/A and inconsistent Bs
+    ; should stop the channel on an early CGB B
     ld a, $00
     ld [rNR34], a
 
     nop
 
     ld a, [hl]
-    bit 2, a
-    jr nz, not_cgbA
-    xor a
+
     ret
-not_cgbA:
-    ld [rDIV], a
-    xor a
-    ldh [rNR52], a
-    cpl
-    ldh [rNR52], a
 
-    ld a, 63
-    ld [rNR21], a
-
-    ld a, $f0
-    ld [rNR22], a
-
-    ld a, $70
-    ld [rNR23], a
-
-    ; trigger the channel with length counter disabled
-    ld a, $80
-    ld [rNR24], a
-
-    ; frame sequencer's next step is one that doesn't
-    ; clock the length counter
-    delay $800
-
-    ; set sound length to 1
-    ld a, 63
-    ld [rNR31], a
-
-    ; trigger the channel with length counter disabled again,
-    ; should stop the channel on CGB B but not GBBC
-    ld a, $00
-    ld [rNR24], a
-
-    nop
-
-    ld a, [hl]
-    bit 1, a
-    jr nz, check_gbbc
-    ld a, $01
-    ret
-check_gbbc:
-    xor a
-    ldh [rNR24], a
-    ld a, [hl]
-    bit 1, a
-    jr nz, confirm_cgbC
-    ld a, $02
-    ret
-confirm_cgbC:
-    ld a, $03
-    ret
 
 ; Check how VRAM reads behave at the transition from mode 3 to mode 0.
 ; Assumes LCD is off, and leaves LCD on afterwards.
@@ -405,4 +405,169 @@ check_agb_or_ags::
     ldh [rSCX], a
     pop af
 
+    ret
+
+
+; Check some OAM DMA bus conflict behavior to test if it is a CGB CPU A or B.
+; Code lifted from LIJI32's `dma_write_timing-wram-C0ACA.asm` 
+;
+; @return a `$aa` on CPU CGB A, or `$00` on CPU CGB B
+check_cgb_a_or_b::
+    ld hl, ._HRAMRoutine
+    ld de, HRAMRoutine
+    ld bc, ._HRAMRoutineEnd - ._HRAMRoutine
+    call MemCopy
+
+    ld hl, ._VRAMRoutine
+    ld de, VRAMRoutine
+    ld bc, ._VRAMRoutineEnd - ._VRAMRoutine
+    call MemCopy
+
+    call .ResetWRAM
+    jp VRAMRoutine
+    
+._HRAMRoutine::
+    ld b, $40
+.wait:
+    dec b
+    jr nz, .wait
+    ret
+._HRAMRoutineEnd:
+
+._VRAMRoutine::
+    ld a, $c1
+    ld b, $aa
+    ld hl, $c155
+    ldh [rDMA], a
+    ld [hl], b
+    call HRAMRoutine
+    ld a, [$fe00]
+    ret
+._VRAMRoutineEnd:
+
+HRAMRoutine EQU $ff80
+VRAMRoutine EQU $a000 - (._VRAMRoutineEnd - ._VRAMRoutine)
+    
+.ResetWRAM::
+    ld a, $f0
+    ld [$fe00], a
+    ld hl, $c100
+    ld a, $10
+.loop:
+    ld [hl+], a
+    inc a
+    jr nz, .loop
+    ret
+
+; Wave corruption test to differentiate between DMG and KF2001 CPUs.
+; 
+; Returns $44 if DMG, and either $55 or $66 if KF2001.
+;
+; When retriggering the channel while it is playing the last 12 bytes of wave
+; RAM, DMG will only copy the current block of 4 bytes to the first 4 bytes of
+; RAM, while the KF2001 will do that in addition to overwriting the first byte
+; of RAM with the value currently being read.
+; The pointer needs to be on the fifth byte of wave RAM to have an effect,
+; so at max sample rate (2MiHz), the CPU needs to wait 1 NOP per 2 samples.
+wave_corruption_test::
+    xor a
+    ldh [rDIV], a
+    ldh [rNR52], a
+    ld a, $80
+    ldh [rNR52], a
+    
+    xor a
+    ldh [rNR30], a
+    ldh [rNR32], a
+
+    ld a, $ef
+    ld b, $ff
+    ld c, $30
+
+.write_wave:
+    add $11
+    ldh [c], a
+    inc c
+    cp b
+    jr nz, .write_wave
+
+    ld a, $ff
+    ldh [rNR33], a
+    ld a, $87
+    ldh [rNR30], a
+    ldh [rNR34], a
+    nop
+    nop
+    ld a, $80
+    ldh [rNR34], a
+    xor a
+    ldh [rNR30], a
+    ld a, [$ff30]
+    ret
+
+; Sweep test to differentiate between early and late KF2001 clone SoCs.
+; Earlier models had buggy channel 1 sweep, but later ones fixed it,
+; but can still be differentiated from a real DMG because of wave RAM
+; corruption behavior.
+; Returns a $28 if early KF2001, or $44 if later KF2001 or DMG.
+sweep_test::
+    ld c, $ff
+
+    call start_apu
+    call sync_sweep
+    
+    ld a, $40
+    ldh [rNR14], a
+    ld a, $1e
+    ldh [rNR11], a
+    ld a, $08
+    ldh [rNR12], a
+    ld a, $08
+    ldh [rNR10], a
+    ld a, $ff
+    ldh [rNR13], a
+    ld a, $c3
+    ldh [rNR14], a
+    ld a, $11
+    ldh [rNR10], a
+.wait_sweep_disable:
+    dec c
+    jr z, sweep_trigger_fail
+    delay $7f6
+    ld a, [hl]
+    and $01
+    jr nz, .wait_sweep_disable
+    
+    ld a, c
+    cpl
+    ret
+
+sweep_trigger_fail::
+    ld a, $ff
+    ret
+
+start_apu::
+    ld hl, $ff26
+    xor a
+    ld [hl], a
+    cpl
+    ld [hl], a
+    ldh [rDIV], a
+    ret
+
+sync_sweep::
+    ld a, $40
+    ldh [rNR14], a
+    ld a, $11
+    ldh [rNR10], a
+    ld a, $08
+    ldh [rNR12], a
+    ld a, $ff
+    ldh [rNR13], a
+    ld a, $83
+    ldh [rNR14], a
+.check_sweep_off:
+    ldh a, [rNR52]
+    and  $01
+    jr nz, .check_sweep_off
     ret

@@ -13,7 +13,7 @@ $(OBJDIR):
 
 $(ROMS): $(OBJDIR)/%.gb : $(OBJDIR)/%.o
 	rgblink -n $(basename $@).sym -m $(basename $@).map -o $@ $<
-	rgbfix -t "WHICH.GB" -v -p 255 $@
+	rgbfix -t "WHICH.GB-RRE" -v -p 255 $@
 
 -include $(OBJECTS:.o=.d)
 

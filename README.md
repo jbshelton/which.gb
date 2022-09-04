@@ -2,11 +2,11 @@
 
 Just a little Game Boy ROM which tries to determine which model/revision your device is.  
 
-It makes use of register values at boot, "extra OAM" differences, PPU quirks, and APU quirks that differ between device revisions.
+It makes use of register values at boot, "extra OAM" differences, PPU quirks, APU quirks, and OAM DMA bus conflicts that differ between device revisions.
 
 ## Limitations
 
-It might not be perfect. I only had one case of someone's GB Boy Colour initializing wave RAM weird, so new GBBC detection may not be true.
+It might not be perfect. Let me know if your device is detected incorrectly!
 
 Currently it cannot discern between all SoC revisions. Devices will be reported as one of the following:
 
@@ -16,24 +16,44 @@ Currently it cannot discern between all SoC revisions. Devices will be reported 
 - SGB-CPU 01
 - CPU SGB2
 - CPU CGB
-- CPU CGB A*
-- CPU CGB B
+- CPU CGB A
+- CPU CGB B (early)
+- CPU CGB B (late)
 - CPU CGB C
 - CPU CGB D
 - CPU CGB E
 - CPU AGB 0/A/A E
 - CPU AGB B/B E
-- GB Boy Colour, June 2020(?) and older*
-- GB Boy Colour, July 2020(?) and newer*
+
+Note that "early" and "late" may be inaccurate terms for the CGB B revisions, as "early" indicates that the wave channel has the same length counter behavior as a CPU CGB or CGB A, whereas "late" indicates slightly different behavior unique to CGB B (the channel requires one extra write to kill from the length counter glitch.)
+
+It can also detect and discern between a few different Gameboy clone SoCs! Here are the ones currently supported:
+
+- Kong Feng KF2001 (early- estimated to be 1997-2008)
+- Kong Feng KF2001 (late- estimated to be 2008-2009)
+- Kong Feng KF2005 (early GB Boy Colour) or KF2007 (later GB Boy Colour)
 
 ## Release Notes
 
+v0.4.1
+
+- Detect KF2001 clone SoCs based on different wave RAM corruption behavior, and discern between earlier and later revisions using channel 1 sweep behavior differences
+- Changed KF2005/KF2007 (GB Boy Colour) detection method to be based based on OAM DMA bus conflict behavior added in v0.4 instead of channel 2 length counter behavior in v0.3.GBBC
+- Added CGB B early and late detection based on channel 3 length counter behavior (however, it may just be unit specific)
+- Removed GB Boy Colour wave RAM test
+
+The OAM DMA conflict test actually returns $10 for CGB B and $00 for GB Boy Colour, though I need to test more units to verify the behavior properly.
+
+v0.4
+
+- Use an OAM DMA bus conflict to discern between devices with CPU CGB A and CPU CGB B revision SOCs. Thanks to [LIJI32](https://github.com/LIJI32/) for discovering this!
+
 v0.3.GBBC
 
-- Discern between CGB A and B using differences in the wave channel length counter. Seems to be non-deterministic, but actual CGB Bs are detected correctly. Others may be detected incorrectly as CGB A due to non-deterministic behavior. Tell me if your CGB detects as A and B on separate test runs!
-- Fixed GB Boy Colour being detected as CPU CGB C or CPU CGB
-- Discern between CGB0/A/B and GB Boy Colour using channel 2's length counter. Instead of behaving like CGB0/A/B channel 1/2/4 (behavior is identical across those channels,) the channels behave like a true CGB B's wave channel length counter, which requires one extra write to NRx4 in order to disable the channel.
-- Discern between older and newer GB Boy Colour SoCs with a different wave RAM test. I have not had the chance to test that many new GB Boy Colours to confirm this, so this detection feature may be removed due to it being non-deterministic.
+- Discern between CGB A and B using differences in the wave channel length counter. Behavior has since been used for early and late CGB B detection since CGB A cannot be detected using this method, but rather with other means.
+- Fixed GB Boy Colour being detected as CPU CGB C (or CPU CGB)
+- Discern between CGB0/A/B and GB Boy Colour using channel 2's length counter. Instead of behaving like CGB0/A/B channel 1/2/4 (behavior is identical across those channels,) the channels behave like a late CGB B's wave channel length counter, which requires one extra write to NRx4 in order to disable the channel.
+- Discern between older (pre-2018) and newer (post-2018) GB Boy Colour SoCs with a different wave RAM test. This detection feature has been removed due to it being unit specific and dependent on faulty wave RAM.
 
 v0.3
 
@@ -53,10 +73,12 @@ v0.2
 
 ## Credits
 
+- Thanks to Lior Halphon (LIJI32) for his research and [SameSuite](https://github.com/LIJI32/SameSuite) test ROMs.
 - Thanks to authors of [Gameboy sound hardware](https://gbdev.gg8.se/wiki/articles/Gameboy_sound_hardware) on the Gameboy Development Wiki.
 - Thanks to Joonas Javanainen (gekkio) for his [mooneye-gb](https://github.com/Gekkio/mooneye-gb/) test ROMs which document the register values at boot.
-- Original which.gb written by Matt Currie. 
-- v0.3.GBBC fixes and features added by Jackson Shelton.
+- Thanks to Ben Morris for archiving [blargg's Gameboy hardware tests](https://github.com/retrio/gb-test-roms) on which KF2001 (revision) detection was based.
+- Written by Matt Currie
+- Clone detection modifications by Jackson Shelton / Reverse Retro
 
 ## License
 
