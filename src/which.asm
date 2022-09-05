@@ -110,6 +110,13 @@ is_dmgABC_or_kf2001::
     call wave_corruption_test
     cp $44
     jr nz, is_kf2001_early_or_late
+
+    ; If the system passes the wave corruption test but fails the sweep test,
+    ; it's not a KF2001 or a DMG CPU. Added 9/5/2022
+is_dmgABC_or_other::
+    call sweep_test
+    cp $28
+    jr z, unknown_other
     print_string_literal "DMG-CPU A/B/C"
     jp done
 
@@ -117,8 +124,6 @@ is_kf2001_early_or_late::
     call sweep_test
     cp $28
     jr z, is_kf2001_early
-    cp $44
-    jr nz, unknown_other
     print_string_literal "Kong Feng KF2001\n(2008 - 2009)"
     jp done
 
@@ -127,7 +132,7 @@ is_kf2001_early::
     jp done
 
 unknown_other::
-    print_string_literal "Unknown! (other)"
+    print_string_literal "Other DMG\nclone (unknown)"
     jp done
 
 is_mgb_or_sgb2::
@@ -412,6 +417,7 @@ check_agb_or_ags::
 ; Code lifted from LIJI32's `dma_write_timing-wram-C0ACA.asm` 
 ;
 ; @return a `$aa` on CPU CGB A, or `$00` on CPU CGB B
+; ^ this is incorrect from my testing. CGB B returns a $10, KF2005/KF2007 returns $00.
 check_cgb_a_or_b::
     ld hl, ._HRAMRoutine
     ld de, HRAMRoutine
