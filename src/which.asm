@@ -17,8 +17,6 @@
 ; LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 ; OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 ; SOFTWARE.
-;
-; which.gb v0.4.1 clone detection mod by jbshelton May 2022
 
 IF (__RGBDS_MAJOR__ == 0 && (__RGBDS_MINOR__ < 4 || (__RGBDS_MINOR__ == 4 && __RGBDS_PATCH__ < 2)))
     FAIL "Requires RGBDS v0.4.2+"
@@ -45,6 +43,8 @@ wInitialB::
 wInitialC::
     DS 1
 
+SECTION "test value", ROM0[$55]
+    db $11
 
 SECTION "boot", ROM0[$100]
     nop                                       
@@ -60,7 +60,7 @@ SECTION "main", ROM0[$150]
 
 main::
     di
-    ld sp, $ffff
+    ld sp, $cfff
 
     ld [wInitialA], a
     ld a, b
@@ -72,7 +72,7 @@ main::
     call ResetCursor
     call LoadFont
 
-    print_string_literal "which.gb v0.4.1\n-------------\n\nseems to be a...\n\n"
+    print_string_literal "which.gb v0.4.2\n-------------\n\nseems to be a...\n\n"
 
     ld a, [wInitialA]
     cp $01
@@ -155,22 +155,6 @@ is_cgb_or_agb_or_ags::
     cp $00
     jp nz, is_agb_or_ags
 
-is_cgb::
-    ; wave ram is not initialised on cgb0
-    ld de, $ff00
-    ld c, 8
-    ld hl, $ff30
-.loop:
-    ld a, [hl+]
-    cp e
-    jp nz, is_cgb0
-    ld a, [hl+]
-    cp d
-    jp nz, is_cgb0
-    dec c
-    jr nz, .loop
-
-    ; if wave ram is initialised, its not cgb0
 is_cgbABCDE::
 
     ; do some extra OAM writes
@@ -200,36 +184,45 @@ is_cgbABCDE::
     cp $aa
     jp z, is_cgbE
 
-is_cgbAB::
+is_cgb0A_or_b::
     call check_cgb_a_or_b
     cp $aa
-    jr z, is_cgbA
-    cp $10
-    jr z, is_cgbABC
-    jr is_kf2005_kf2007
+    jr z, is_cgb0A
 
 is_cgbABC::
     call check_cgb_ab_or_c
     cp $f0
-    jr nz, is_cgbC
-    call check_cgb_b_early_or_late
+    jp nz, is_cgbC
+    call check_cgb_or_gbbc
     cp $f0
-    jr nz, is_cgbB
-
-is_cgbB_early::
-    print_string_literal "CPU CGB B\n(early)"
-    jp done
+    jp z, is_cgbB
 
 is_kf2005_kf2007::
     print_string_literal "Kong Feng\nKF2005/KF2007"
     jp done
+
+    ; if wave ram is initialised, it's not cgb0
+is_cgb0A::
+    ; wave ram is not initialised on cgb0
+    ld de, $ff00
+    ld c, 8
+    ld hl, $ff30
+.loop:
+    ld a, [hl+]
+    cp e
+    jp nz, is_cgb0
+    ld a, [hl+]
+    cp d
+    jp nz, is_cgb0
+    dec c
+    jr nz, .loop
 
 is_cgbA::
     print_string_literal "CPU CGB A"
     jp done
 
 is_cgbB::
-    print_string_literal "CPU CGB B\n(late)"
+    print_string_literal "CPU CGB B"
     jp done
 
 is_cgbC::
@@ -273,7 +266,7 @@ done::
 
 ; Check some APU behavior to test if is a CGB CPU A/B or CPU CGB C
 ;
-; @return a `$f0` on CPU CGB A/B, or `$f2` on CPU CGB C
+; @return a `$f0` on CPU CGB A/B and KF2005/KF2007, or `$f2` on CPU CGB C
 check_cgb_ab_or_c::
     ld hl, rNR52
     ld [rDIV], a
@@ -304,10 +297,11 @@ check_cgb_ab_or_c::
     ld [rNR21], a
 
     ; trigger the channel with length counter disabled again,
-    ; should stop the channel on CGB A/B
-    ; it doesn't on a KF2005/KF2007 because the NRx4 glitch needs to be performed twice to kill the channel
-    ; (that's why this test is performed later than the stock which.gb)
+    ; should stop the channel on CGB A/B and KF2005/KF2007, due to 2 writes
+    ; if trigger bit is not set, channel will be inactive
+
     ld a, $00
+    ld [rNR24], a
     ld [rNR24], a
 
     nop
@@ -316,7 +310,10 @@ check_cgb_ab_or_c::
 
     ret
 
-check_cgb_b_early_or_late::
+    ; Checks length counter behavior after confirmation that the unit is not CGB C or newer.
+    ;
+    ; @return a `$f0` on CPU CGB0/A/B, or `$f2` on KF2005/KF2007
+check_cgb_or_gbbc::
     ld hl, rNR52
     ld [rDIV], a
     xor a
@@ -324,18 +321,18 @@ check_cgb_b_early_or_late::
     cpl
     ldh [rNR52], a
 
-    ld a, $80
-    ldh [rNR30], a
-
     ld a, 63
-    ld [rNR31], a
+    ld [rNR21], a
+
+    ld a, $f0
+    ld [rNR22], a
 
     ld a, $ff
-    ld [rNR33], a
+    ld [rNR23], a
 
     ; trigger the channel with length counter disabled
     ld a, $80
-    ld [rNR34], a
+    ld [rNR24], a
 
     ; frame sequencer's next step is one that doesn't
     ; clock the length counter
@@ -343,19 +340,20 @@ check_cgb_b_early_or_late::
 
     ; set sound length to 1
     ld a, 63
-    ld [rNR31], a
+    ld [rNR21], a
 
     ; trigger the channel with length counter disabled again,
-    ; should stop the channel on an early CGB B
+    ; should stop the channel on CGB A/B, not on KF2005/KF2007
+    ; (since every channel requires one extra write to kill)
+
     ld a, $00
-    ld [rNR34], a
+    ld [rNR24], a
 
     nop
 
     ld a, [hl]
 
     ret
-
 
 ; Check how VRAM reads behave at the transition from mode 3 to mode 0.
 ; Assumes LCD is off, and leaves LCD on afterwards.
@@ -416,8 +414,7 @@ check_agb_or_ags::
 ; Check some OAM DMA bus conflict behavior to test if it is a CGB CPU A or B.
 ; Code lifted from LIJI32's `dma_write_timing-wram-C0ACA.asm` 
 ;
-; @return a `$aa` on CPU CGB A, or `$00` on CPU CGB B
-; ^ this is incorrect from my testing. CGB B returns a $10, KF2005/KF2007 returns $00.
+; @return a `$aa` on CPU CGB A, and either `$00` or `$10` on CPU CGB B.
 check_cgb_a_or_b::
     ld hl, ._HRAMRoutine
     ld de, HRAMRoutine
@@ -457,6 +454,8 @@ VRAMRoutine EQU $a000 - (._VRAMRoutineEnd - ._VRAMRoutine)
 .ResetWRAM::
     ld a, $f0
     ld [$fe00], a
+    ld a, $22
+    ld [$fe55], a
     ld hl, $c100
     ld a, $10
 .loop:
@@ -466,8 +465,6 @@ VRAMRoutine EQU $a000 - (._VRAMRoutineEnd - ._VRAMRoutine)
     ret
 
 ; Wave corruption test to differentiate between DMG and KF2001 CPUs.
-; 
-; Returns $44 if DMG, and either $55 or $66 if KF2001.
 ;
 ; When retriggering the channel while it is playing the last 12 bytes of wave
 ; RAM, DMG will only copy the current block of 4 bytes to the first 4 bytes of
@@ -475,6 +472,8 @@ VRAMRoutine EQU $a000 - (._VRAMRoutineEnd - ._VRAMRoutine)
 ; of RAM with the value currently being read.
 ; The pointer needs to be on the fifth byte of wave RAM to have an effect,
 ; so at max sample rate (2MiHz), the CPU needs to wait 1 NOP per 2 samples.
+;
+; @return a `$44` if DMG, or either `$55` or `$66` on KF2001
 wave_corruption_test::
     xor a
     ldh [rDIV], a
@@ -512,10 +511,12 @@ wave_corruption_test::
     ret
 
 ; Sweep test to differentiate between early and late KF2001 clone SoCs.
-; Earlier models had buggy channel 1 sweep, but later ones fixed it,
-; but can still be differentiated from a real DMG because of wave RAM
-; corruption behavior.
-; Returns a $28 if early KF2001, or $44 if later KF2001 or DMG.
+; Earlier models had buggy channel 1 sweep, (no increasing frequency,)
+; but later ones fixed it.
+; The KF2001 can still be differentiated from a real DMG because of wave 
+; RAM corruption behavior.
+;
+; @return a `$28` on early KF2001, or `$44` on later KF2001 or DMG
 sweep_test::
     ld c, $ff
 

@@ -17,23 +17,26 @@ Currently it cannot discern between all SoC revisions. Devices will be reported 
 - CPU SGB2
 - CPU CGB
 - CPU CGB A
-- CPU CGB B (early)
-- CPU CGB B (late)
+- CPU CGB B
 - CPU CGB C
 - CPU CGB D
 - CPU CGB E
 - CPU AGB 0/A/A E
 - CPU AGB B/B E
 
-Note that "early" and "late" may be inaccurate terms for the CGB B revisions, as "early" indicates that the wave channel has the same length counter behavior as a CPU CGB or CGB A, whereas "late" indicates slightly different behavior unique to CGB B (the channel requires one extra write to kill from the length counter glitch.)
-
 It can also detect and discern between a few different Gameboy clone SoCs! Here are the ones currently supported:
 
 - Kong Feng KF2001 (early- estimated to be 1997-2008)
 - Kong Feng KF2001 (late- estimated to be 2008-2009)
-- Kong Feng KF2005 (early GB Boy Colour) or KF2007 (later GB Boy Colour)
+- Kong Feng KF2005 (early GB Boy Colour) or KF2007 (later GB Boy Colour) (though it cannot discern between the two specifically)
 
 ## Release Notes
+
+v0.4.2
+
+- Removed CGB B early and late detection due to behavior being unit specific
+- Changed GB Boy Colour detection back to the length counter method due to the OAM DMA test being unit specific and sometimes erroneously detecting as CGB B
+- Cleaned up the code a bit
 
 v0.4.1
 
